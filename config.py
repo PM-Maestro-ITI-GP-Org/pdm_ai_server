@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 # "ollama" or "llamacpp". Ollama can list and switch between many pulled
 # models from one running process; llama-server loads exactly one model per
@@ -18,3 +19,9 @@ BACKEND_TIMEOUT_SECONDS = 3.0
 AGENT_MODELS_DIR = os.environ.get(
     "AGENT_MODELS_DIR", os.path.expanduser("~/.cache/pdm_agent/models")
 )
+
+# apps/agent/server/config.py -> apps/agent/server -> apps/agent -> apps -> repo root.
+_DEFAULT_MAESTRO_ROOT = Path(__file__).resolve().parents[3]
+AGENT_MAESTRO_ROOT = os.environ.get("AGENT_MAESTRO_ROOT", str(_DEFAULT_MAESTRO_ROOT))
+
+CHAT_TIMEOUT_SECONDS = 120.0

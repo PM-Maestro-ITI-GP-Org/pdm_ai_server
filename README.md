@@ -96,3 +96,24 @@ size-verified:
 On failure (network error, disk full, size mismatch) `error` holds a short
 message, `active` and `done` are both `false`, and the partial file is
 removed — never a stuck "downloading" that isn't.
+
+`POST /chat` with body `{"message": "what tabs does PdM Maestro have?"}` →
+grounded, cited answer from the whole-corpus system prompt (`docs/SCOPE.md`
+§6.5, §7):
+
+```json
+{"answer": "PdM Maestro has ... (CLAUDE.md) ..."}
+```
+
+- `503 {"error": "..."}` — backend unreachable
+- `504 {"error": "..."}` — model call timed out (120s budget; local inference
+  can be slow, especially on first load)
+- `500 {"error": "..."}` — anything else unexpected, never a hang or crash
+
+Under `ollama`, an optional `"model"` field picks which pulled model answers;
+it defaults to whichever `/models` would list first.
+
+The corpus is the docs reachable from `AGENT_MAESTRO_ROOT` (default: this
+repo's root, computed from `server/`'s own location) — `CLAUDE.md`, `docs/*.md`,
+`core/README.md`, each app's `README.md`, and this app's own `docs/*.md`.
+Loaded once at startup, not re-read per request.

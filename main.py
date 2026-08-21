@@ -47,6 +47,48 @@ CATALOG = [
 
 DOWNLOAD_CHUNK_BYTES = 1 << 20
 
+# Reachable corpus for A2a (docs/SCOPE.md §6.5): whole-corpus context, no
+# retrieval infrastructure yet — small enough to paste directly. Each app's
+# deeper docs/ subdirectory (e.g. apps/motor_control/docs/RIG_ACCESS.md) is
+# deliberately excluded; widen this once retrieval, not stuffing, is in place.
+_APPS = ["data_collection", "motor_control", "mlops", "ota", "agent"]
+
+CORPUS_PATHS = (
+    ["CLAUDE.md"]
+    + sorted(f"docs/{p.name}" for p in (Path(config.AGENT_MAESTRO_ROOT) / "docs").glob("*.md"))
+    + ["core/README.md"]
+    + [f"apps/{app}/README.md" for app in _APPS]
+    + sorted(
+        f"apps/agent/docs/{p.name}"
+        for p in (Path(config.AGENT_MAESTRO_ROOT) / "apps/agent/docs").glob("*.md")
+    )
+)
+
+
+def _load_corpus() -> list[tuple[str, str]]:
+    root = Path(config.AGENT_MAESTRO_ROOT)
+    return [(rel, (root / rel).read_text()) for rel in CORPUS_PATHS]
+
+
+CORPUS = _load_corpus()
+
+
+def _build_system_prompt(corpus: list[tuple[str, str]]) -> str:
+    files = "\n\n".join(f"--- FILE: {rel} ---\n{text}" for rel, text in corpus)
+    return (
+        "You are a developer assistant for the PdM Maestro toolchain, a "
+        "Qt/QML application that merges several tools for a predictive-"
+        "maintenance motor rig.\n\n"
+        "Answer only using the documents provided below. For every factual "
+        "claim, cite which document it came from with a parenthetical, e.g. "
+        "(CLAUDE.md) or (docs/STATUS.md). If the documentation doesn't cover "
+        "something the user asks about, say so plainly instead of guessing.\n\n"
+        f"{files}"
+    )
+
+
+SYSTEM_PROMPT = _build_system_prompt(CORPUS)
+
 # One download at a time, no queue (§6 keeps this phase deliberately small).
 # Plain module-level state is safe here: every mutation happens on the
 # asyncio event loop with no `await` between check and set.
@@ -62,6 +104,11 @@ _download_state = {
 
 class DownloadRequest(BaseModel):
     id: str
+
+
+class ChatRequest(BaseModel):
+    message: str
+    model: str | None = None
 
 
 async def _fetch_ollama_models() -> list[str]:
@@ -199,3 +246,54 @@ async def download_status():
         "done": _download_state["done"],
         "error": _download_state["error"],
     }
+
+
+async def _chat_llamacpp(messages: list[dict]) -> str:
+    async with httpx.AsyncClient(timeout=config.CHAT_TIMEOUT_SECONDS) as client:
+        resp = await client.post(
+            f"{config.LLAMACPP_HOST}/v1/chat/completions",
+            json={"messages": messages, "stream": False},
+        )
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"]
+
+
+async def _chat_ollama(messages: list[dict], model: str | None) -> str:
+    if model is None:
+        names = await _fetch_ollama_models()
+        if not names:
+            raise ValueError("no ollama models available")
+        model = names[0]
+    async with httpx.AsyncClient(timeout=config.CHAT_TIMEOUT_SECONDS) as client:
+        resp = await client.post(
+            f"{config.OLLAMA_HOST}/api/chat",
+            json={"model": model, "messages": messages, "stream": False},
+        )
+        resp.raise_for_status()
+        return resp.json()["message"]["content"]
+
+
+@app.post("/chat")
+async def chat(body: ChatRequest):
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": body.message},
+    ]
+    try:
+        if config.BACKEND == "ollama":
+            answer = await _chat_ollama(messages, body.model)
+        else:
+            answer = await _chat_llamacpp(messages)
+    except httpx.TimeoutException:
+        return JSONResponse(
+            status_code=504,
+            content={"error": f"{config.BACKEND} at {_backend_host()} timed out after {config.CHAT_TIMEOUT_SECONDS}s"},
+        )
+    except (httpx.HTTPError, ValueError) as exc:
+        return JSONResponse(
+            status_code=503,
+            content={"error": f"could not reach {config.BACKEND} at {_backend_host()}: {exc}"},
+        )
+    except Exception as exc:  # malformed model response, etc. — never crash the server
+        return JSONResponse(status_code=500, content={"error": str(exc)})
+    return {"answer": answer}

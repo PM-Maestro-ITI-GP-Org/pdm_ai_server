@@ -1,5 +1,5 @@
 """
-Self-check for server/runtime.py: the build-guard and process-tracking logic,
+Self-check for runtime.py: the build-guard and process-tracking logic,
 without an actual multi-minute git-clone-and-compile or a real llama-server
 process. Plain asserts, no framework: run with `python3 test_runtime.py`.
 """

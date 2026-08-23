@@ -37,10 +37,10 @@ import config
 
 SERVER_DIR = Path(__file__).resolve().parent
 
-# Where the Qt shell keeps its settings. Must match shell/main.cpp's
-# setOrganizationName/setApplicationName exactly -- these strings are the
-# contract between the two halves, and nothing else in this repo derives
-# them programmatically.
+# Where the Qt shell keeps its settings. Must match pdm_ai_agent_gui's
+# shell/main.cpp setOrganizationName/setApplicationName exactly -- these
+# strings are the contract between the two repos, and nothing else in this
+# one derives them programmatically.
 QT_CONFIG_DIR = Path("~/.config/PM-Maestro-ITI-GP-Org").expanduser()
 QT_CONFIG_FILE = QT_CONFIG_DIR / "PdM Maestro.conf"
 

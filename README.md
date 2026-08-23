@@ -1,20 +1,23 @@
-# pdm_ai_agent server
+# pdm_ai_server
 
-The Python side of the AI Agent tab (`docs/SCOPE.md` §6.1). Runs outside Qt,
-talks to a local model backend, and is reached over HTTP by the Qt client.
-Phase A2b is complete on both halves: a retrieval-grounded `/chat` with
-citation checking, and the tool half — the model can search, read and
-navigate the running app. On top of that sits the runtime bootstrap
-(`runtime.py`): a fresh checkout can build `llama-server`, download models,
-and start both backend processes from inside the server itself, no manual
+Standalone local AI inference server for the PdM Maestro toolchain — the
+backend behind the AI Agent tab ([pdm_ai_agent_gui](https://github.com/PM-Maestro-ITI-GP-Org/pdm_ai_agent_gui)).
+Runs outside Qt, talks to a local model backend, and is reached over HTTP by
+the Qt client. Phase A2b is complete on both halves: a retrieval-grounded
+`/chat` with citation checking, and the tool half — the model can search,
+read and navigate the running app. On top of that sits the runtime bootstrap
+(`runtime.py`): a fresh clone can build `llama-server`, download models, and
+start both backend processes from inside the server itself, no manual
 terminal work left.
+
+> `docs/SCOPE.md` references below point at `apps/agent/docs/SCOPE.md` in the
+> GUI repo, where the phase plan and hardware measurements live.
 
 ## Install
 
-The one-command path:
+The one-command path, from this repo's root:
 
 ```bash
-cd apps/agent/server
 python3 setup.py
 ```
 
@@ -23,10 +26,9 @@ It writes the config file, creates the venv, optionally builds llama-server
 URL and its "Start local AI" command. Rerunnable anytime; every prompt takes
 its default from Enter alone.
 
-By hand instead:
+By hand instead (same effect, from this repo's root):
 
 ```bash
-cd apps/agent/server
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt

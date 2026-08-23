@@ -568,7 +568,7 @@ async def tools_status():
     }
 
 
-# ---- runtime bootstrap (server/runtime.py) -------------------------------
+# ---- runtime bootstrap (runtime.py) --------------------------------------
 # The "easy setup" half: a fresh checkout needs no llama.cpp already built
 # or installed anywhere, and no shell commands run by hand to start the two
 # backend processes this server talks to on :8080/:8081 -- everything this

@@ -106,10 +106,10 @@ AGENT_RUNTIME_DIR = os.environ.get(
 
 # This server used to assume it was checked out three directories under a
 # Maestro tree (apps/agent/server/config.py -> ... -> repo root) and derived
-# this from __file__. Once server/ is its own repository (no longer nested
-# inside PdM_Maestro_devApp at a fixed depth) that guess is simply wrong on
-# anyone else's machine, so there is no default left: this now has to be set,
-# by the setup wizard (setup.py) writing it to the config file, or by hand.
+# this from __file__. As its own repository, cloned anywhere, that guess is
+# simply wrong on everyone's machine, so there is no default left: this now
+# has to be set, by the setup wizard (setup.py) writing it to the config
+# file, or by hand.
 # A missing/wrong value fails loudly the first time a corpus path is read
 # (main.py), not silently here.
 AGENT_MAESTRO_ROOT = _get("AGENT_MAESTRO_ROOT", "")

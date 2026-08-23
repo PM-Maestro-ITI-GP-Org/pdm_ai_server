@@ -141,7 +141,7 @@ def start_build() -> bool:
 # ---- running the backend(s) ---------------------------------------------
 
 # Two llama-server processes, chat and embed, same reasoning as
-# server/README.md's "Running the backends": one process holds exactly one
+# README.md's "Running the backends": one process holds exactly one
 # model, so a chat model and an embedding model need separate processes on
 # separate ports regardless of who starts them.
 _processes: dict[str, asyncio.subprocess.Process] = {}

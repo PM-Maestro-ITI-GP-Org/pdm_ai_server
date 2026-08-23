@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Compile check
+        run: python -m py_compile *.py
+
+      - name: Runtime self-checks
+        run: python test_runtime.py
+
+      - name: Tools self-checks
+        # Skips itself (exit 0) when no Maestro checkout is reachable --
+        # CI has no private monorepo; the local run inside a tree is the real one.
+        run: python test_tools.py
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build source archive
+        run: |
+          git archive --format=tar.gz \
+            --prefix="pdm_ai_server-${GITHUB_REF_NAME}/" \
+            -o "pdm_ai_server-${GITHUB_REF_NAME}.tar.gz" HEAD
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: pdm_ai_server-*.tar.gz
+          body: |
+            Source release of the PdM AI Agent server.
+
+            ```bash
+            tar xzf pdm_ai_server-*.tar.gz && cd pdm_ai_server-*
+            python3 setup.py   # interactive wizard: venv, config, optional llama-server build
+            ```
+          generate_release_notes: true

@@ -80,22 +80,64 @@ jobs:
         with:
           python-version: "3.12"
 
+      # Resolve llama.cpp's current default-branch HEAD first so the cache
+      # below can key on it -- same "whatever's newest" clone runtime.py's
+      # own _run_build does locally, just resolved up front so a rebuild
+      # only happens on the pushes where upstream actually moved, not
+      # every single push to this repo.
+      - name: Resolve llama.cpp HEAD
+        id: llama_ref
+        run: |
+          sha=$(git ls-remote https://github.com/ggml-org/llama.cpp.git HEAD | cut -f1)
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Cache llama-server build
+        id: llama_cache
+        uses: actions/cache@v4
+        with:
+          path: llama-server-bin
+          key: llama-server-cpu-${{ steps.llama_ref.outputs.sha }}
+
+      - name: Build llama-server (bundled fallback, CPU-only)
+        # Hosted runners have no GPU, so this can never be the CUDA build
+        # runtime.py's own _run_build produces on a real machine (its
+        # -DCMAKE_CUDA_ARCHITECTURES=native comment explains why that one
+        # has to happen locally, per-GPU). This is a bundled *fallback*: the
+        # executable ships with something that already works on any x86_64
+        # Linux box the moment it's downloaded, and POST /runtime/build (or
+        # rerunning the wizard) remains how someone with an actual GPU gets
+        # the faster machine-specific build instead.
+        if: steps.llama_cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update && sudo apt-get install -y cmake build-essential
+          git clone --depth 1 https://github.com/ggml-org/llama.cpp.git llama.cpp-src
+          cmake -B llama.cpp-src/build -S llama.cpp-src -DCMAKE_BUILD_TYPE=Release
+          cmake --build llama.cpp-src/build --target llama-server -j"$(nproc)"
+          mkdir -p llama-server-bin
+          cp llama.cpp-src/build/bin/llama-server llama-server-bin/llama-server
+
       - name: Build standalone executable
         # Frozen from entrypoint.py, not main.py: main.py refuses to even
         # import without a valid AGENT_MAESTRO_ROOT (correct for `uvicorn
         # main:app`, where setup.py has always already run) -- entrypoint.py
         # checks readiness first and runs setup.py's wizard automatically on
         # a first launch, so the executable alone is a real installer, not
-        # just the bare server. No data files to bundle -- the corpus and
-        # every cache dir (models, index, runtime) live outside the repo,
-        # resolved from AGENT_MAESTRO_ROOT / AGENT_*_DIR at runtime, same as
-        # the source install. --collect-all is the standard fix for
-        # uvicorn/fastapi's dynamic imports (protocol/loop backends) that
-        # PyInstaller's static analysis alone would miss.
+        # just the bare server. --add-binary bundles the llama-server built
+        # above into the onefile archive; entrypoint.py extracts it to
+        # AGENT_RUNTIME_DIR on first launch so runtime.is_available() is
+        # already true with no local build step. No other data files to
+        # bundle -- the corpus and every other cache dir (models, index)
+        # live outside the repo, resolved from AGENT_MAESTRO_ROOT /
+        # AGENT_*_DIR at runtime, same as the source install. --collect-all
+        # is the standard fix for uvicorn/fastapi's dynamic imports
+        # (protocol/loop backends) that PyInstaller's static analysis alone
+        # would miss.
         run: |
+          chmod +x llama-server-bin/llama-server
           pip install -r requirements.txt pyinstaller
           pyinstaller --onefile --name pdm-ai-server \
             --collect-all uvicorn --collect-all fastapi --collect-all httpx \
+            --add-binary "llama-server-bin/llama-server:llama-server-bin" \
             entrypoint.py
           mv dist/pdm-ai-server "pdm-ai-server-linux-x86_64-${{ steps.ver.outputs.tag }}"
 
@@ -117,7 +159,12 @@ jobs:
 
             Or skip Python entirely -- the executable installs itself on
             first run (clones a PdM Maestro checkout if needed, picks a
-            backend and a model) and just starts serving on every run after:
+            backend and a model) and just starts serving on every run after,
+            with a bundled CPU-only llama-server so there's no local build
+            step either. A machine with an actual GPU gets real speed by
+            rebuilding it once (`POST /runtime/build`, or rerun the
+            executable's wizard), CUDA auto-detected for that GPU
+            specifically:
 
             ```bash
             chmod +x pdm-ai-server-linux-x86_64-*

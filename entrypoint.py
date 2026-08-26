@@ -9,9 +9,34 @@ a backend, download a model) before main.py's module-level corpus-building
 ever executes. `python main.py` and `uvicorn main:app` are untouched.
 """
 import importlib
+import shutil
+import sys
 from pathlib import Path
 
 import config
+
+
+def _extract_bundled_runtime() -> None:
+    """CI's release job bundles a CPU-only llama-server inside this
+    executable (see ci.yml's release job) so a fresh download has a working
+    binary with zero local build step. Copies it out to AGENT_RUNTIME_DIR
+    once; every launch after finds it already there and skips this. A
+    source install (`python entrypoint.py`, no PyInstaller) has nothing to
+    extract from -- sys._MEIPASS only exists inside a frozen process."""
+    if not getattr(sys, "frozen", False) or not hasattr(sys, "_MEIPASS"):
+        return
+    import runtime
+
+    if runtime.binary_path().exists():
+        return
+    bundled = Path(sys._MEIPASS) / "llama-server-bin" / "llama-server"
+    if not bundled.exists():
+        return
+    dest = runtime.binary_path()
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(bundled, dest)
+    dest.chmod(0o755)
+    print(f"using bundled llama-server: {dest}")
 
 
 def _config_ready() -> bool:
@@ -48,6 +73,8 @@ def _active_model() -> dict | None:
 
 
 def main() -> int:
+    _extract_bundled_runtime()
+
     # Gated on config alone, not on a model being downloaded -- a deliberate
     # "skip for now" during the wizard must not turn into the wizard
     # re-running on every subsequent launch. Matches the source install's

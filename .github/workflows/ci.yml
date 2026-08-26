@@ -73,16 +73,45 @@ jobs:
             --prefix="pdm_ai_server-${{ steps.ver.outputs.tag }}/" \
             -o "pdm_ai_server-${{ steps.ver.outputs.tag }}.tar.gz" HEAD
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build standalone executable
+        # No data files to bundle -- the corpus and every cache dir
+        # (models, index, runtime) live outside the repo, resolved from
+        # AGENT_MAESTRO_ROOT / AGENT_*_DIR at runtime, same as the source
+        # install. --collect-all is the standard fix for uvicorn/fastapi's
+        # dynamic imports (protocol/loop backends) that PyInstaller's static
+        # analysis alone would miss.
+        run: |
+          pip install -r requirements.txt pyinstaller
+          pyinstaller --onefile --name pdm-ai-server \
+            --collect-all uvicorn --collect-all fastapi --collect-all httpx \
+            main.py
+          mv dist/pdm-ai-server "pdm-ai-server-linux-x86_64-${{ steps.ver.outputs.tag }}"
+
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
-          files: pdm_ai_server-*.tar.gz
+          files: |
+            pdm_ai_server-*.tar.gz
+            pdm-ai-server-linux-x86_64-*
           body: |
-            Source release of the PdM AI Agent server.
+            Source release of the PdM AI Agent server, plus a standalone
+            Linux x86_64 executable that needs no Python install.
 
             ```bash
             tar xzf pdm_ai_server-*.tar.gz && cd pdm_ai_server-*
             python3 setup.py   # interactive wizard: venv, config, optional llama-server build
+            ```
+
+            Or skip Python entirely with the executable, once `AGENT_MAESTRO_ROOT`
+            points at a real PdM Maestro checkout:
+
+            ```bash
+            chmod +x pdm-ai-server-linux-x86_64-*
+            AGENT_MAESTRO_ROOT=/path/to/PdM-Maestro_gui ./pdm-ai-server-linux-x86_64-*
             ```
           generate_release_notes: true

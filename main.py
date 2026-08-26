@@ -714,3 +714,12 @@ async def chat(body: ChatRequest):
         # forward-looking: the UI to show/act on it is not built yet.
         "tool_calls": tool_log,
     }
+
+
+if __name__ == "__main__":
+    # The normal path is `uvicorn main:app` (README, setup.py) -- this exists
+    # so `python main.py` (or a PyInstaller build of this file) also works,
+    # since a frozen executable has no `main:app` import string to resolve.
+    import uvicorn
+
+    uvicorn.run(app, host="0.0.0.0", port=config.AGENT_SERVER_PORT)

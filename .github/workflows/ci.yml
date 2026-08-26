@@ -33,22 +33,50 @@ jobs:
         # CI has no private monorepo; the local run inside a tree is the real one.
         run: python test_tools.py
 
+  # Runs for both a plain push to main (auto: bump the patch version) and a
+  # hand-pushed v* tag (manual: cut whatever version was asked for). One job,
+  # one run -- a tag pushed here with GITHUB_TOKEN would NOT retrigger this
+  # workflow (GitHub suppresses that on purpose, to stop infinite loops), so
+  # tagging and releasing happen together instead of across two runs.
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: (github.ref == 'refs/heads/main' && github.event_name == 'push') || startsWith(github.ref, 'refs/tags/v')
     needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine version
+        id: ver
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            git fetch --tags
+            last=$(git tag --list 'v*' --sort=-v:refname | head -n1)
+            if [ -z "$last" ]; then
+              next="v0.1.0"
+            else
+              ver=${last#v}
+              IFS=. read -r major minor patch <<< "$ver"
+              next="v$major.$minor.$((patch + 1))"
+            fi
+            git tag "$next"
+            git push origin "$next"
+            echo "tag=$next" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Build source archive
         run: |
           git archive --format=tar.gz \
-            --prefix="pdm_ai_server-${GITHUB_REF_NAME}/" \
-            -o "pdm_ai_server-${GITHUB_REF_NAME}.tar.gz" HEAD
+            --prefix="pdm_ai_server-${{ steps.ver.outputs.tag }}/" \
+            -o "pdm_ai_server-${{ steps.ver.outputs.tag }}.tar.gz" HEAD
 
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.ver.outputs.tag }}
           files: pdm_ai_server-*.tar.gz
           body: |
             Source release of the PdM AI Agent server.

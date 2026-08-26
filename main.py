@@ -359,6 +359,22 @@ async def _run_download(entry: dict) -> None:
     finally:
         _download_state["active"] = False
 
+    if _download_state["done"] and config.BACKEND == "llamacpp":
+        # The GUI's own Download button used to just save the .gguf --
+        # nothing here or in the GUI itself ever started serving it (only
+        # entrypoint.py's launch-time check does, and only on the *next*
+        # launch). Closing that gap: a model that just finished downloading
+        # should actually become usable without a restart.
+        hf_id = f"{entry['repo']}:{entry['quant']}"
+        try:
+            await runtime.start_chat_backend(hf_id, port=8080)
+            await runtime.start_embed_backend(config.EMBED_MODEL_HF_ID, port=8081)
+        except Exception:
+            pass  # /health keeps reporting "unreachable"; nothing more to do here
+        import setup
+        setup.write_config(config.AGENT_MAESTRO_ROOT, config.BACKEND,
+                            config.AGENT_SERVER_PORT, entry["id"])
+
 
 @app.post("/download")
 async def download(body: DownloadRequest):

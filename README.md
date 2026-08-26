@@ -392,4 +392,3 @@ each app's `README.md`, and this app's own `docs/*.md`: 98,717 bytes across
 11 documents. It is read and embedded once at startup, not re-read per
 request; `POST /index/rebuild` above is the way to pick up an edit without
 restarting the process.
-# trigger-test 1787763773

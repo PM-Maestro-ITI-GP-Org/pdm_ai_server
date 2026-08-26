@@ -101,8 +101,12 @@ jobs:
           # bundle doesn't carry, so it'd be a silent cache hit on the exact
           # broken artifact this same commit fixes. Bump this prefix again
           # for any future change to the build step itself, not just when
-          # upstream moves.
-          key: llama-server-cpu-v2-${{ steps.llama_ref.outputs.sha }}
+          # upstream moves. v3: v2's binary was linked correctly but crashed
+          # with "Illegal instruction" on a CPU older/different than the
+          # runner's own -- GGML_NATIVE defaults ON, compiling for whatever
+          # instruction set (AVX-512, etc.) the build machine happens to
+          # have, not a portable baseline.
+          key: llama-server-cpu-v3-${{ steps.llama_ref.outputs.sha }}
 
       - name: Build llama-server (bundled fallback, CPU-only)
         # Hosted runners have no GPU, so this can never be the CUDA build
@@ -125,16 +129,28 @@ jobs:
           # loading shared libraries" the moment it runs somewhere those
           # .so files aren't sitting alongside it. Static linking trades a
           # bigger single file for exactly one thing to bundle.
+          #
+          # -DGGML_NATIVE=OFF: ggml/CMakeLists.txt defaults this ON, which
+          # compiles for whatever instruction set the BUILD machine (this
+          # runner) happens to have -- AVX-512 or other extensions a
+          # different CPU downloading this release doesn't, crashing with
+          # SIGILL the instant such an instruction is hit. Turning native
+          # off switches to ggml's own portable baseline (SSE4.2/AVX/AVX2/
+          # FMA/BMI2 on, AVX512 explicitly off regardless) instead of
+          # guessing this runner's exact CPU is everyone's CPU.
           cmake -B llama.cpp-src/build -S llama.cpp-src \
-            -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF
+            -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DGGML_NATIVE=OFF
           cmake --build llama.cpp-src/build --target llama-server -j"$(nproc)"
           mkdir -p llama-server-bin
           cp llama.cpp-src/build/bin/llama-server llama-server-bin/llama-server
-          # Confirms the fix actually worked, in the same job that would
-          # otherwise ship a silently broken binary -- ldd exits 1 when
-          # there's nothing left to resolve outside the standard system
-          # libs, which is exactly the success case here.
+          # Confirms the link is actually self-contained (ldd exits 1 when
+          # nothing's left to resolve outside standard system libs) and
+          # that the binary actually runs on THIS machine without crashing
+          # -- catches a build corruption, though not a portability-to-a-
+          # different-CPU regression, since this runner's own CPU is by
+          # definition whatever it was just built for.
           ! ldd llama-server-bin/llama-server | grep "not found"
+          llama-server-bin/llama-server --help > /dev/null
 
       - name: Build standalone executable
         # Frozen from entrypoint.py, not main.py: main.py refuses to even

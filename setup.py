@@ -154,6 +154,21 @@ def download_model(entry: dict) -> None:
 
 # ---- starting the backend --------------------------------------------------
 
+async def _reachable_now(port: int) -> bool:
+    """One immediate check, no retry loop -- _wait_reachable's own sleep(2.0)
+    always runs once after a failed attempt regardless of its deadline, so
+    reusing it here for "is anything already up" would block ~2s and print
+    a stray dot on the common case (nothing running yet)."""
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(timeout=1.0) as client:
+            resp = await client.get(f"http://localhost:{port}/v1/models")
+            return resp.status_code == 200
+    except httpx.HTTPError:
+        return False
+
+
 async def _wait_reachable(port: int, timeout: float) -> bool:
     """Poll llama-server's own /v1/models the same way main.py's /health
     does, since starting the process is not the same as it being loaded and
@@ -190,6 +205,16 @@ def start_backend_and_wait(model_entry: dict, timeout: float = 120.0) -> bool:
     contract.
     """
     import runtime
+
+    # A previous launch's llama-server (main.py's shutdown no longer kills
+    # it -- see the lifespan comment) may still be alive and already serving
+    # *some* model. Good enough: skip the "loading" wait entirely rather
+    # than spawn a second process that would just fail to bind the same
+    # port anyway.
+    if asyncio.run(_reachable_now(8080)):
+        print(f"  {model_entry['label']} (or whatever's already loaded) is "
+              "already up -- reusing it")
+        return True
 
     if not runtime.is_available():
         print("  ! no llama-server binary -- skipped; POST /runtime/build "
@@ -280,6 +305,32 @@ def ensure_venv() -> Path | None:
 
 # ---- 3. llama-server (optional, multi-minute) ----------------------------
 
+def _build_with_progress() -> bool:
+    """runtime.py's _run_build, with a live one-line progress printout
+    instead of silence for however many minutes it takes. Shared by the
+    interactive y/N prompt below and entrypoint.py's automatic CUDA
+    upgrade -- same build either way, only whether something asked first
+    differs."""
+    import runtime
+
+    async def run_with_progress() -> bool:
+        task = asyncio.create_task(runtime._run_build())
+        while not task.done():
+            await asyncio.sleep(1.0)
+            stage = runtime._build_state["stage"]
+            tail = runtime._build_state["log_tail"][-1:] if runtime._build_state["log_tail"] else []
+            print(f"\r  [{stage}] {' '.join(tail)[:100]:<100}", end="", flush=True)
+        print()
+        if runtime._build_state["error"]:
+            print(f"  ! build failed: {runtime._build_state['error']}")
+            print("    the full log tail is in GET /runtime/build/status once the server runs")
+            return False
+        print(f"  built: {runtime.binary_path()}")
+        return True
+
+    return asyncio.run(run_with_progress())
+
+
 def offer_runtime_build() -> None:
     import runtime
 
@@ -295,24 +346,28 @@ def offer_runtime_build() -> None:
         f"  into {config.AGENT_RUNTIME_DIR}; several minutes on a laptop,\n"
         "  CUDA enabled automatically where nvcc exists. [y/N]: ").strip().lower()
 
-    async def run_with_progress() -> None:
-        task = asyncio.create_task(runtime._run_build())
-        while not task.done():
-            await asyncio.sleep(1.0)
-            stage = runtime._build_state["stage"]
-            tail = runtime._build_state["log_tail"][-1:] if runtime._build_state["log_tail"] else []
-            print(f"\r  [{stage}] {' '.join(tail)[:100]:<100}", end="", flush=True)
-        print()
-        if runtime._build_state["error"]:
-            print(f"  ! build failed: {runtime._build_state['error']}")
-            print("    the full log tail is in GET /runtime/build/status once the server runs")
-        else:
-            print(f"  built: {runtime.binary_path()}")
-
     if answer == "y":
-        asyncio.run(run_with_progress())
+        _build_with_progress()
     else:
         print("  skipped -- the server (or the wizard, rerun anytime) can build later")
+
+
+def build_for_cuda_if_available() -> bool:
+    """Auto (no prompt): if this machine actually has CUDA and the tools to
+    build with it, replace whatever's at runtime.binary_path() with a real
+    machine-specific build. False, doing nothing, if there's no CUDA here --
+    the caller decides what "nothing to upgrade to" means for it."""
+    import runtime
+
+    if not runtime._has_cuda():
+        return False
+    if not shutil.which("git") or not shutil.which("cmake"):
+        print("  ! CUDA detected but git/cmake missing -- can't build; "
+              "install them and rerun, or POST /runtime/build later")
+        return False
+    print("  CUDA detected -- building a GPU-accelerated llama-server "
+          "(one-time, several minutes)")
+    return _build_with_progress()
 
 
 # ---- 4. the Qt side -------------------------------------------------------

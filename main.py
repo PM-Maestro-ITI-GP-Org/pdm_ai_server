@@ -26,10 +26,18 @@ async def lifespan(_app: FastAPI):
     # common case the Qt side is built to display, not an error (§6.1).
     await _ensure_index()
     yield
-    # A backend this server started itself must not outlive it -- an
-    # orphaned llama-server holding the GPU is a worse failure mode than the
-    # server just not offering /chat until someone restarts it manually.
-    await runtime.stop_all_backends()
+    # Deliberately NOT stop_all_backends() here anymore. The original
+    # reasoning (an orphaned llama-server outliving this process is worse
+    # than losing /chat until a manual restart) turned into the opposite
+    # complaint in practice: the standalone executable relaunches this
+    # process on every start, and killing the backend on every shutdown
+    # meant reloading the model from scratch every single time -- for a
+    # 3-7B model, a real wait, every launch, forever. start_new_session=True
+    # (runtime.py) already keeps it alive past a Ctrl-C to this process; the
+    # entrypoint.py side now checks for an already-reachable backend before
+    # starting a new one, so restarting the wrapper reuses what's already
+    # loaded instead of reloading it. POST /runtime/backend/stop remains the
+    # explicit way to actually shut the model down.
 
 
 app = FastAPI(lifespan=lifespan)

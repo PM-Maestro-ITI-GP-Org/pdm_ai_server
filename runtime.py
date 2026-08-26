@@ -159,6 +159,7 @@ async def start_chat_backend(model_id: str, port: int, ngl: int = 99) -> None:
         resolve_binary(), "-hf", model_id, "--port", str(port),
         "--jinja", "-ngl", str(ngl),
         stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+        start_new_session=True,  # survive a Ctrl-C to *this* process -- see stop_all_backends
     )
 
 
@@ -173,6 +174,7 @@ async def start_embed_backend(model_id: str, port: int) -> None:
         "--embeddings", "--pooling", "mean", "-ngl", "0",
         "-ub", "2048", "-b", "2048",
         stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+        start_new_session=True,
     )
 
 

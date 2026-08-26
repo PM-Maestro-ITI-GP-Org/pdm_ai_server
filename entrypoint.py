@@ -16,6 +16,16 @@ from pathlib import Path
 import config
 
 
+def _cpu_fallback_marker() -> Path:
+    """Sits next to runtime.binary_path() only while that file is the
+    bundled CPU-only fallback, not a real machine-specific build -- lets
+    _maybe_upgrade_to_cuda tell the two apart without guessing from the
+    binary's contents."""
+    import runtime
+
+    return runtime.binary_path().parent / ".bundled_cpu_fallback"
+
+
 def _extract_bundled_runtime() -> None:
     """CI's release job bundles a CPU-only llama-server inside this
     executable (see ci.yml's release job) so a fresh download has a working
@@ -36,7 +46,23 @@ def _extract_bundled_runtime() -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(bundled, dest)
     dest.chmod(0o755)
+    _cpu_fallback_marker().touch()
     print(f"using bundled llama-server: {dest}")
+
+
+def _maybe_upgrade_to_cuda() -> None:
+    """If the binary in place is still the bundled CPU fallback and this
+    machine actually has CUDA, replace it with a real build automatically
+    -- no prompt, since a CPU-only server on a CUDA box is leaving real
+    speed on the table for no reason. One-time cost (several minutes) the
+    first launch this is true; every launch after is a no-op fast marker
+    check, since the marker is gone once the upgrade succeeds."""
+    marker = _cpu_fallback_marker()
+    if not marker.exists():
+        return
+    import setup
+    if setup.build_for_cuda_if_available():
+        marker.unlink(missing_ok=True)
 
 
 def _config_ready() -> bool:
@@ -74,6 +100,7 @@ def _active_model() -> dict | None:
 
 def main() -> int:
     _extract_bundled_runtime()
+    _maybe_upgrade_to_cuda()
 
     # Gated on config alone, not on a model being downloaded -- a deliberate
     # "skip for now" during the wizard must not turn into the wizard

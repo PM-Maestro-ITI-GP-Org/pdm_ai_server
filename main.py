@@ -333,6 +333,25 @@ async def catalog():
     return {"models": [{**entry, "installed": _is_installed(entry)} for entry in CATALOG]}
 
 
+async def _start_backend_for(entry: dict) -> None:
+    """Starts serving this catalog entry's model and remembers the choice
+    for entrypoint.py's next-launch check. Shared by a download that just
+    finished, an already-installed model /download would otherwise just
+    short-circuit past silently, and the explicit /activate endpoint the
+    GUI's Settings 'Start' button calls."""
+    if config.BACKEND != "llamacpp":
+        return  # ollama manages its own models; nothing for us to start
+    hf_id = f"{entry['repo']}:{entry['quant']}"
+    try:
+        await runtime.start_chat_backend(hf_id, port=8080)
+        await runtime.start_embed_backend(config.EMBED_MODEL_HF_ID, port=8081)
+    except Exception:
+        pass  # /health keeps reporting "unreachable"; nothing more to do here
+    import setup
+    setup.write_config(config.AGENT_MAESTRO_ROOT, config.BACKEND,
+                        config.AGENT_SERVER_PORT, entry["id"])
+
+
 async def _run_download(entry: dict) -> None:
     dest_dir = _models_dir()
     final_path = dest_dir / entry["filename"]
@@ -359,21 +378,26 @@ async def _run_download(entry: dict) -> None:
     finally:
         _download_state["active"] = False
 
-    if _download_state["done"] and config.BACKEND == "llamacpp":
-        # The GUI's own Download button used to just save the .gguf --
-        # nothing here or in the GUI itself ever started serving it (only
-        # entrypoint.py's launch-time check does, and only on the *next*
-        # launch). Closing that gap: a model that just finished downloading
-        # should actually become usable without a restart.
-        hf_id = f"{entry['repo']}:{entry['quant']}"
-        try:
-            await runtime.start_chat_backend(hf_id, port=8080)
-            await runtime.start_embed_backend(config.EMBED_MODEL_HF_ID, port=8081)
-        except Exception:
-            pass  # /health keeps reporting "unreachable"; nothing more to do here
-        import setup
-        setup.write_config(config.AGENT_MAESTRO_ROOT, config.BACKEND,
-                            config.AGENT_SERVER_PORT, entry["id"])
+    if _download_state["done"]:
+        await _start_backend_for(entry)
+
+
+@app.post("/activate")
+async def activate(body: DownloadRequest):
+    """Explicit "start serving this model" -- same catalog id shape as
+    /download, no download attached. The GUI's Settings tab has no other
+    reliable way to ask for this: a model can be installed but never
+    started (see /download's already_installed branch) with nothing in
+    the UI's normal flow forcing a retry."""
+    entry = _catalog_entry(body.id)
+    if entry is None:
+        return JSONResponse(status_code=404, content={"error": "unknown model id"})
+    if not _is_installed(entry):
+        return JSONResponse(status_code=409, content={"error": "not downloaded yet -- POST /download first"})
+    if config.BACKEND == "llamacpp" and not runtime.is_available():
+        return JSONResponse(status_code=503, content={"error": "no llama-server binary -- POST /runtime/build first"})
+    await _start_backend_for(entry)
+    return {"activated": True}
 
 
 @app.post("/download")
@@ -382,6 +406,11 @@ async def download(body: DownloadRequest):
     if entry is None:
         return JSONResponse(status_code=404, content={"error": "unknown model id"})
     if _is_installed(entry):
+        # A model downloaded before this endpoint started auto-activating
+        # (or one that was never activated for any other reason) would sit
+        # on disk forever, "installed" but never served, with this
+        # short-circuit the only thing standing between it and being used.
+        await _start_backend_for(entry)
         return {"already_installed": True}
     if _download_state["active"]:
         return JSONResponse(status_code=409, content={"error": "a download is already in progress"})

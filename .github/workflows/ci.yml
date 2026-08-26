@@ -96,7 +96,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: llama-server-bin
-          key: llama-server-cpu-${{ steps.llama_ref.outputs.sha }}
+          # v2: the v1 cache entries hold a build from before -DBUILD_SHARED_
+          # LIBS=OFF landed -- dynamically linked against .so files this
+          # bundle doesn't carry, so it'd be a silent cache hit on the exact
+          # broken artifact this same commit fixes. Bump this prefix again
+          # for any future change to the build step itself, not just when
+          # upstream moves.
+          key: llama-server-cpu-v2-${{ steps.llama_ref.outputs.sha }}
 
       - name: Build llama-server (bundled fallback, CPU-only)
         # Hosted runners have no GPU, so this can never be the CUDA build
@@ -111,10 +117,24 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y cmake build-essential
           git clone --depth 1 https://github.com/ggml-org/llama.cpp.git llama.cpp-src
-          cmake -B llama.cpp-src/build -S llama.cpp-src -DCMAKE_BUILD_TYPE=Release
+          # -DBUILD_SHARED_LIBS=OFF: llama.cpp's default build makes
+          # llama-server a thin executable dynamically linked against
+          # libllama-server-impl.so/libggml*.so/etc, all living next to it
+          # in build/bin/ -- bundling just the one file into a PyInstaller
+          # onefile and shipping it elsewhere breaks with "error while
+          # loading shared libraries" the moment it runs somewhere those
+          # .so files aren't sitting alongside it. Static linking trades a
+          # bigger single file for exactly one thing to bundle.
+          cmake -B llama.cpp-src/build -S llama.cpp-src \
+            -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF
           cmake --build llama.cpp-src/build --target llama-server -j"$(nproc)"
           mkdir -p llama-server-bin
           cp llama.cpp-src/build/bin/llama-server llama-server-bin/llama-server
+          # Confirms the fix actually worked, in the same job that would
+          # otherwise ship a silently broken binary -- ldd exits 1 when
+          # there's nothing left to resolve outside the standard system
+          # libs, which is exactly the success case here.
+          ! ldd llama-server-bin/llama-server | grep "not found"
 
       - name: Build standalone executable
         # Frozen from entrypoint.py, not main.py: main.py refuses to even

@@ -98,7 +98,17 @@ async def _run_build() -> None:
                              LLAMA_CPP_REPO, str(src_dir))
 
         cuda = _has_cuda()
-        cmake_args = ["cmake", "-B", str(build_dir), "-DCMAKE_BUILD_TYPE", "Release"]
+        # -DBUILD_SHARED_LIBS=OFF: without it llama-server links against
+        # libggml-cuda.so/etc sitting in build_dir/bin -- fine as long as
+        # that build tree exists, but binary_path() only ever copies the
+        # one executable out of it (below), so deleting the checkout later
+        # to reclaim disk breaks a binary that looked complete. Not native
+        # vs GGML_NATIVE, though: this build is compiled ON the machine
+        # it'll run on, so targeting its exact GPU (CMAKE_CUDA_ARCHITECTURES
+        # below) is correct here, unlike ci.yml's bundled build which has
+        # to guess at an arbitrary downloader's CPU instead.
+        cmake_args = ["cmake", "-B", str(build_dir), "-DCMAKE_BUILD_TYPE=Release",
+                      "-DBUILD_SHARED_LIBS=OFF"]
         # native, not a hardcoded compute-capability list -- the
         # one number this session had to pass by hand (`75`, for the GTX
         # 1650 actually on this laptop) is exactly what "native" replaces:

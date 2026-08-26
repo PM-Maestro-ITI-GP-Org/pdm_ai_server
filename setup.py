@@ -4,7 +4,8 @@ Easy setup for the AI Agent server, runnable straight from a fresh checkout:
     python3 setup.py
 
 A numbered-prompt walk through exactly the things this project otherwise makes
-you do by hand (docs/SCOPE.md §6): point the server at a Maestro checkout,
+you do by hand (docs/SCOPE.md §6): point the server at a Maestro checkout
+(cloning one by default if run standalone, e.g. from a release tarball),
 pick a backend, create the venv, and optionally build llama-server right here
 (the multi-minute git-clone-and-compile that runtime.py automates over HTTP
 once the server is up -- at setup time nobody is up yet, so the wizard calls
@@ -44,6 +45,12 @@ SERVER_DIR = Path(__file__).resolve().parent
 QT_CONFIG_DIR = Path("~/.config/PM-Maestro-ITI-GP-Org").expanduser()
 QT_CONFIG_FILE = QT_CONFIG_DIR / "PdM Maestro.conf"
 
+# A release tarball (this file, downloaded standalone) has no Maestro
+# checkout to walk up to. Clone one here by default instead of making every
+# fresh install hand-type a path.
+MAESTRO_REPO_URL = "https://github.com/PM-Maestro-ITI-GP-Org/PdM-Maestro_gui.git"
+DEFAULT_MAESTRO_ROOT = Path("~/.local/share/pdm_agent/PdM-Maestro_gui").expanduser()
+
 
 def ask(prompt: str, default: str) -> str:
     answer = input(f"{prompt} [{default}]: ").strip()
@@ -67,7 +74,30 @@ def detect_maestro_root() -> str:
     for parent in SERVER_DIR.parents:
         if (parent / "CLAUDE.md").exists():
             return str(parent)
+    if (DEFAULT_MAESTRO_ROOT / "CLAUDE.md").exists():
+        return str(DEFAULT_MAESTRO_ROOT)
     return ""
+
+
+def clone_maestro(dest: str) -> bool:
+    """Fetch a fresh checkout for a standalone install that isn't running
+    from inside one already. Needs submodules -- the corpus reads app repo
+    docs (e.g. apps/motor_control/README.md) straight out of them."""
+    if not shutil.which("git"):
+        print("  ! git not on PATH -- can't clone; check out "
+              f"{MAESTRO_REPO_URL} by hand and rerun setup with that path")
+        return False
+    print(f"  cloning {MAESTRO_REPO_URL}\n    -> {dest} (with submodules, this takes a bit) ...")
+    try:
+        subprocess.run(
+            ["git", "clone", "--recurse-submodules", MAESTRO_REPO_URL, dest],
+            check=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        print(f"  ! clone failed ({exc}); check out {MAESTRO_REPO_URL} by hand "
+              "and rerun setup with that path")
+        return False
+    return True
 
 
 # ---- 1. the config file --------------------------------------------------
@@ -198,12 +228,15 @@ def main() -> int:
     detected = detect_maestro_root()
     maestro_root = ask(
         "Where is the PdM Maestro checkout (the folder containing CLAUDE.md)?",
-        detected or "~/data/proj/PdM_Maestro_devApp",
+        detected or str(DEFAULT_MAESTRO_ROOT),
     )
     maestro_root = str(Path(maestro_root).expanduser().resolve())
     if not (Path(maestro_root) / "CLAUDE.md").exists():
-        print(f"  ! {maestro_root} does not look like a Maestro checkout "
-              f"(no CLAUDE.md) -- written anyway; the server will refuse to start on it")
+        if not Path(maestro_root).exists():
+            clone_maestro(maestro_root)
+        if not (Path(maestro_root) / "CLAUDE.md").exists():
+            print(f"  ! {maestro_root} does not look like a Maestro checkout "
+                  f"(no CLAUDE.md) -- written anyway; the server will refuse to start on it")
 
     backend = ["llamacpp", "ollama"][choose("Which model backend?", ["llamacpp", "ollama"])]
     port = int(ask("Port for this server", str(config._get("AGENT_SERVER_PORT", "8420"))))

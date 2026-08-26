@@ -489,6 +489,37 @@ def _tool_call_name_and_args(raw_call: dict) -> tuple[str, dict | None]:
     return name, None
 
 
+def _salvage_tool_call(content: str) -> tuple[str, dict] | None:
+    """A small model sometimes prints the tool call as JSON text in its
+    answer instead of using the real tool_calls channel -- observed live,
+    Qwen2.5-1.5B answering
+    '{{"name": "navigate_to", "arguments": {"tab": "motor_control"}}}'
+    verbatim, extra brace on each side, with "Take me there" never
+    appearing because no tool call was ever actually registered. The
+    failure is specifically an extra wrapping brace or two around an
+    otherwise well-formed object, not arbitrary malformed JSON -- so this
+    tries the widest span between the first '{' and last '}' first, then
+    peels up to two characters off each side, rather than parsing anything
+    more elaborate than that. Returns None on anything else, which leaves
+    today's existing behavior (the raw text shown as the answer) exactly
+    as it was."""
+    start = content.find("{")
+    end = content.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return None
+    known_names = {t["function"]["name"] for t in tools.TOOL_SCHEMAS}
+    for i in range(start, min(start + 3, end)):
+        for j in range(end, max(end - 3, i), -1):
+            try:
+                obj = json.loads(content[i:j + 1])
+            except ValueError:
+                continue
+            if (isinstance(obj, dict) and isinstance(obj.get("name"), str)
+                    and obj["name"] in known_names and isinstance(obj.get("arguments"), dict)):
+                return obj["name"], obj["arguments"]
+    return None
+
+
 async def _chat_message_llamacpp(messages: list[dict], tool_schema: list[dict] | None) -> dict:
     body = {"messages": messages, "stream": False}
     if tool_schema:
@@ -687,6 +718,14 @@ async def chat(body: ChatRequest):
             msg = await _chat_message(messages, body.model, None)
 
         raw_calls = (msg.get("tool_calls") or []) if offer_tools else []
+        if not raw_calls and offer_tools:
+            # See _salvage_tool_call: reusing the branch below unchanged
+            # (dispatch, tool_log, followup completion) rather than a
+            # second copy of that logic for a call that arrived as text.
+            salvaged = _salvage_tool_call(_content_of(msg))
+            if salvaged:
+                name, arguments = salvaged
+                raw_calls = [{"function": {"name": name, "arguments": arguments}}]
         if raw_calls:
             # Bounded to the first call, one round. A full ReAct loop is next
             # to build only once a single round is proven not to be enough --

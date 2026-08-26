@@ -339,6 +339,55 @@ def main() -> int:
     return 0
 
 
+def run_frozen_setup() -> None:
+    """Same wizard, trimmed for entrypoint.py's frozen-executable path: no
+    venv step (dependencies are already bundled into the binary), and the
+    Qt "Start local AI" command points straight at this executable
+    (sys.executable, which PyInstaller's bootloader resolves to the running
+    binary itself) instead of a venv's uvicorn."""
+    print("== PdM AI Agent server -- first-run setup ==\n")
+
+    detected = detect_maestro_root()
+    maestro_root = ask(
+        "Where is the PdM Maestro checkout (the folder containing CLAUDE.md)?",
+        detected or str(DEFAULT_MAESTRO_ROOT),
+    )
+    maestro_root = str(Path(maestro_root).expanduser().resolve())
+    if not (Path(maestro_root) / "CLAUDE.md").exists():
+        if not Path(maestro_root).exists():
+            clone_maestro(maestro_root)
+        if not (Path(maestro_root) / "CLAUDE.md").exists():
+            print(f"  ! {maestro_root} does not look like a Maestro checkout "
+                  f"(no CLAUDE.md) -- written anyway; the server will refuse to start on it")
+
+    backend = ["llamacpp", "ollama"][choose("Which model backend?", ["llamacpp", "ollama"])]
+    port = int(ask("Port for this server", str(config._get("AGENT_SERVER_PORT", "8420"))))
+    model_entry = choose_model() if backend == "llamacpp" else None
+
+    path = write_config(maestro_root, backend, port)
+    print(f"\n[1/4] config written: {path}")
+
+    print("[2/4] llama-server runtime:")
+    offer_runtime_build()
+
+    print("[3/4] model:")
+    if model_entry:
+        download_model(model_entry)
+    else:
+        print("  skipped -- pick one later from the AI Agent tab's Settings view")
+
+    print("[4/4] Qt side:")
+    url = f"http://127.0.0.1:{port}"
+    write_qt_settings(url, f"exec '{sys.executable}'")
+
+    print(
+        "\nSetup done -- starting the server now.\n"
+        f"  * server URL: {url}\n"
+        + (f"  * model ready: {model_entry['label']}\n" if model_entry else
+           "  * no model downloaded -- pick one from the AI Agent tab's Settings view\n")
+    )
+
+
 if __name__ == "__main__":
     try:
         raise SystemExit(main())

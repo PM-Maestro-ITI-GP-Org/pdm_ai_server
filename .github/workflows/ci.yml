@@ -81,17 +81,22 @@ jobs:
           python-version: "3.12"
 
       - name: Build standalone executable
-        # No data files to bundle -- the corpus and every cache dir
-        # (models, index, runtime) live outside the repo, resolved from
-        # AGENT_MAESTRO_ROOT / AGENT_*_DIR at runtime, same as the source
-        # install. --collect-all is the standard fix for uvicorn/fastapi's
-        # dynamic imports (protocol/loop backends) that PyInstaller's static
-        # analysis alone would miss.
+        # Frozen from entrypoint.py, not main.py: main.py refuses to even
+        # import without a valid AGENT_MAESTRO_ROOT (correct for `uvicorn
+        # main:app`, where setup.py has always already run) -- entrypoint.py
+        # checks readiness first and runs setup.py's wizard automatically on
+        # a first launch, so the executable alone is a real installer, not
+        # just the bare server. No data files to bundle -- the corpus and
+        # every cache dir (models, index, runtime) live outside the repo,
+        # resolved from AGENT_MAESTRO_ROOT / AGENT_*_DIR at runtime, same as
+        # the source install. --collect-all is the standard fix for
+        # uvicorn/fastapi's dynamic imports (protocol/loop backends) that
+        # PyInstaller's static analysis alone would miss.
         run: |
           pip install -r requirements.txt pyinstaller
           pyinstaller --onefile --name pdm-ai-server \
             --collect-all uvicorn --collect-all fastapi --collect-all httpx \
-            main.py
+            entrypoint.py
           mv dist/pdm-ai-server "pdm-ai-server-linux-x86_64-${{ steps.ver.outputs.tag }}"
 
       - name: Create release
@@ -110,11 +115,12 @@ jobs:
             python3 setup.py   # interactive wizard: venv, config, optional llama-server build
             ```
 
-            Or skip Python entirely with the executable, once `AGENT_MAESTRO_ROOT`
-            points at a real PdM Maestro checkout:
+            Or skip Python entirely -- the executable installs itself on
+            first run (clones a PdM Maestro checkout if needed, picks a
+            backend and a model) and just starts serving on every run after:
 
             ```bash
             chmod +x pdm-ai-server-linux-x86_64-*
-            AGENT_MAESTRO_ROOT=/path/to/PdM-Maestro_gui ./pdm-ai-server-linux-x86_64-*
+            ./pdm-ai-server-linux-x86_64-*
             ```
           generate_release_notes: true

@@ -576,7 +576,7 @@ async def runtime_backend_status():
 
 class BackendStartRequest(BaseModel):
     chat_model: str  # an -hf repo:quant id, same format as the CATALOG entries
-    embed_model: str = "nomic-ai/nomic-embed-text-v1.5-GGUF:Q8_0"
+    embed_model: str = config.EMBED_MODEL_HF_ID
 
 
 @app.post("/runtime/backend/start")

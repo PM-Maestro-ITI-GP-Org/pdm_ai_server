@@ -117,6 +117,7 @@ CATALOG = [
         "repo": "Qwen/Qwen2.5-1.5B-Instruct-GGUF",
         "filename": "qwen2.5-1.5b-instruct-q4_k_m.gguf",
         "size_bytes": 1117320736,
+        "quant": "Q4_K_M",
     },
     {
         "id": "qwen2.5-3b-instruct-q4",
@@ -124,6 +125,7 @@ CATALOG = [
         "repo": "Qwen/Qwen2.5-3B-Instruct-GGUF",
         "filename": "qwen2.5-3b-instruct-q4_k_m.gguf",
         "size_bytes": 2104932768,
+        "quant": "Q4_K_M",
     },
     {
         "id": "qwen2.5-7b-instruct-q4",
@@ -131,6 +133,7 @@ CATALOG = [
         "repo": "bartowski/Qwen2.5-7B-Instruct-GGUF",
         "filename": "Qwen2.5-7B-Instruct-Q4_K_M.gguf",
         "size_bytes": 4683074240,
+        "quant": "Q4_K_M",
     },
     {
         "id": "llama-3.2-3b-instruct-q4",
@@ -138,8 +141,16 @@ CATALOG = [
         "repo": "bartowski/Llama-3.2-3B-Instruct-GGUF",
         "filename": "Llama-3.2-3B-Instruct-Q4_K_M.gguf",
         "size_bytes": 2019377696,
+        "quant": "Q4_K_M",
     },
 ]
+
+# The one embedding model this server knows how to run (see the EMBED_QUERY_
+# PREFIX comment above for why nomic-embed-text specifically). Named here,
+# not just inlined in main.py's BackendStartRequest default, so setup.py's
+# wizard can start the same backend it advertises without a second copy of
+# the string to keep in sync.
+EMBED_MODEL_HF_ID = "nomic-ai/nomic-embed-text-v1.5-GGUF:Q8_0"
 
 # This server used to assume it was checked out three directories under a
 # Maestro tree (apps/agent/server/config.py -> ... -> repo root) and derived

@@ -152,6 +152,63 @@ def download_model(entry: dict) -> None:
         partial_path.unlink(missing_ok=True)
 
 
+# ---- starting the backend --------------------------------------------------
+
+async def _wait_reachable(port: int, timeout: float) -> bool:
+    """Poll llama-server's own /v1/models the same way main.py's /health
+    does, since starting the process is not the same as it being loaded and
+    answering -- a 7B model can take real time to come up."""
+    import httpx
+
+    deadline = asyncio.get_event_loop().time() + timeout
+    async with httpx.AsyncClient(timeout=2.0) as client:
+        while asyncio.get_event_loop().time() < deadline:
+            try:
+                resp = await client.get(f"http://localhost:{port}/v1/models")
+                if resp.status_code == 200:
+                    return True
+            except httpx.HTTPError:
+                pass
+            print(".", end="", flush=True)
+            await asyncio.sleep(2.0)
+    return False
+
+
+def start_backend_and_wait(model_entry: dict, timeout: float = 120.0) -> bool:
+    """Start llama-server on the downloaded model and the standard embed
+    model, then wait for both to actually answer -- so setup ends with the
+    server genuinely connected, not just process-started. Requires the
+    runtime binary (offer_runtime_build) to already exist; returns False
+    without doing anything otherwise, same as /runtime/backend/start would.
+
+    ponytail: this re-downloads the same .gguf a second time, into
+    llama-server's own -hf cache -- start_chat_backend takes a repo:quant id,
+    not the file setup.py already fetched into AGENT_MODELS_DIR. One-time
+    cost (llama-server caches it after), not a fix for this pass; pointing
+    it at the local file directly (`-m <path>`) is the upgrade if the
+    duplicate download ever matters enough to justify touching runtime.py's
+    contract.
+    """
+    import runtime
+
+    if not runtime.is_available():
+        print("  ! no llama-server binary -- skipped; POST /runtime/build "
+              "once the server is running, or rerun this wizard")
+        return False
+
+    hf_id = f"{model_entry['repo']}:{model_entry['quant']}"
+
+    async def _run() -> bool:
+        await runtime.start_chat_backend(hf_id, port=8080)
+        await runtime.start_embed_backend(config.EMBED_MODEL_HF_ID, port=8081)
+        print(f"  waiting for {model_entry['label']} to load ", end="", flush=True)
+        ok = await _wait_reachable(8080, timeout)
+        print(" ready" if ok else " timed out")
+        return ok
+
+    return asyncio.run(_run())
+
+
 # ---- 1. the config file --------------------------------------------------
 
 def write_config(maestro_root: str, backend: str, port: int) -> Path:
@@ -306,13 +363,19 @@ def main() -> int:
     print("[3/5] llama-server runtime:")
     offer_runtime_build()
 
-    print("[4/5] model:")
+    print("[4/6] model:")
     if model_entry:
         download_model(model_entry)
     else:
         print("  skipped -- pick one later from the AI Agent tab's Settings view")
 
-    print("[5/5] Qt side:")
+    print("[5/6] starting the backend:")
+    backend_ready = model_entry is not None and start_backend_and_wait(model_entry)
+    if model_entry and not backend_ready:
+        print("  ! not connected -- start it later from the AI Agent tab, or "
+              "POST /runtime/backend/start once the server is running")
+
+    print("[6/6] Qt side:")
     url = f"http://127.0.0.1:{port}"
     if venv_python:
         # exec so the launched server replaces the shell, not outlives it as
@@ -331,8 +394,8 @@ def main() -> int:
         f"  * launch the PdM Maestro app -> AI Agent tab -> 'Start local AI'\n"
         f"    (or by hand: cd {SERVER_DIR} && ./venv/bin/uvicorn main:app --host 127.0.0.1 --port {port})\n"
         f"  * server URL: {url}\n"
-        + (f"  * model ready: {model_entry['label']} -- pick it in the AI Agent tab's Settings view\n"
-           if model_entry else
+        + (f"  * model ready and serving: {model_entry['label']}\n" if backend_ready else
+           f"  * model ready: {model_entry['label']} -- backend didn't come up, see above\n" if model_entry else
            "  * no model downloaded -- pick one from inside the app (Settings tab of the AI Agent)\n")
         + "    if step 3 was skipped, POST /runtime/build builds llama-server on demand"
     )
@@ -370,20 +433,27 @@ def run_frozen_setup() -> None:
     print("[2/4] llama-server runtime:")
     offer_runtime_build()
 
-    print("[3/4] model:")
+    print("[3/5] model:")
     if model_entry:
         download_model(model_entry)
     else:
         print("  skipped -- pick one later from the AI Agent tab's Settings view")
 
-    print("[4/4] Qt side:")
+    print("[4/5] starting the backend:")
+    backend_ready = model_entry is not None and start_backend_and_wait(model_entry)
+    if model_entry and not backend_ready:
+        print("  ! not connected -- POST /runtime/backend/start once the "
+              "server is running, or check GET /runtime/build/status")
+
+    print("[5/5] Qt side:")
     url = f"http://127.0.0.1:{port}"
     write_qt_settings(url, f"exec '{sys.executable}'")
 
     print(
         "\nSetup done -- starting the server now.\n"
         f"  * server URL: {url}\n"
-        + (f"  * model ready: {model_entry['label']}\n" if model_entry else
+        + (f"  * model ready and serving: {model_entry['label']}\n" if backend_ready else
+           f"  * model downloaded: {model_entry['label']} -- backend didn't come up, see above\n" if model_entry else
            "  * no model downloaded -- pick one from the AI Agent tab's Settings view\n")
     )
 

@@ -34,40 +34,9 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-# Curated, not fetched from HF's search API — four known-good targets,
-# spanning the hardware tiers in docs/SCOPE.md §6.4. Filenames and
-# size_bytes are the real values for each repo's Q4_K_M file, resolved by
-# hand against the HF API; keep them in sync if a repo re-quantizes.
-CATALOG = [
-    {
-        "id": "qwen2.5-1.5b-instruct-q4",
-        "label": "Qwen2.5 1.5B Instruct (Q4_K_M)",
-        "repo": "Qwen/Qwen2.5-1.5B-Instruct-GGUF",
-        "filename": "qwen2.5-1.5b-instruct-q4_k_m.gguf",
-        "size_bytes": 1117320736,
-    },
-    {
-        "id": "qwen2.5-3b-instruct-q4",
-        "label": "Qwen2.5 3B Instruct (Q4_K_M)",
-        "repo": "Qwen/Qwen2.5-3B-Instruct-GGUF",
-        "filename": "qwen2.5-3b-instruct-q4_k_m.gguf",
-        "size_bytes": 2104932768,
-    },
-    {
-        "id": "qwen2.5-7b-instruct-q4",
-        "label": "Qwen2.5 7B Instruct (Q4_K_M)",
-        "repo": "bartowski/Qwen2.5-7B-Instruct-GGUF",
-        "filename": "Qwen2.5-7B-Instruct-Q4_K_M.gguf",
-        "size_bytes": 4683074240,
-    },
-    {
-        "id": "llama-3.2-3b-instruct-q4",
-        "label": "Llama 3.2 3B Instruct (Q4_K_M)",
-        "repo": "bartowski/Llama-3.2-3B-Instruct-GGUF",
-        "filename": "Llama-3.2-3B-Instruct-Q4_K_M.gguf",
-        "size_bytes": 2019377696,
-    },
-]
+# Moved to config.py so setup.py can list it without importing this module
+# (which builds the corpus and needs AGENT_MAESTRO_ROOT at import time).
+CATALOG = config.CATALOG
 
 DOWNLOAD_CHUNK_BYTES = 1 << 20
 

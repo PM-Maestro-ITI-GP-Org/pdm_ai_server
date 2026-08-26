@@ -6,10 +6,12 @@ Easy setup for the AI Agent server, runnable straight from a fresh checkout:
 A numbered-prompt walk through exactly the things this project otherwise makes
 you do by hand (docs/SCOPE.md §6): point the server at a Maestro checkout
 (cloning one by default if run standalone, e.g. from a release tarball),
-pick a backend, create the venv, and optionally build llama-server right here
-(the multi-minute git-clone-and-compile that runtime.py automates over HTTP
-once the server is up -- at setup time nobody is up yet, so the wizard calls
-into runtime.py directly).
+pick a backend and a model (downloaded right here, so the AI Agent tab has
+one ready without a trip through its Settings view first), create the venv,
+and optionally build llama-server right here (the multi-minute
+git-clone-and-compile that runtime.py automates over HTTP once the server is
+up -- at setup time nobody is up yet, so the wizard calls into runtime.py
+directly).
 
 Everything it decides is written to one TOML file (~/.config/pdm_agent/
 config.toml, or AGENT_CONFIG_PATH) that config.py already reads, env vars
@@ -98,6 +100,56 @@ def clone_maestro(dest: str) -> bool:
               "and rerun setup with that path")
         return False
     return True
+
+
+# ---- model picker ----------------------------------------------------------
+
+def choose_model() -> dict | None:
+    """Pick one of config.CATALOG's four curated models, or skip. Same list
+    the AI Agent tab's Settings view offers -- doing it here means a fresh
+    install can be ready to chat without opening the GUI first."""
+    labels = [m["label"] for m in config.CATALOG]
+    idx = choose("Which model should this box use", labels + ["skip for now"])
+    if idx == len(config.CATALOG):
+        return None
+    return config.CATALOG[idx]
+
+
+def download_model(entry: dict) -> None:
+    """Synchronous fetch with a terminal progress bar, same URL and
+    destination convention as main.py's own /download -- duplicated instead
+    of imported because main.py can't be imported before AGENT_MAESTRO_ROOT
+    is written (it builds the corpus at module scope)."""
+    dest_dir = Path(config.AGENT_MODELS_DIR)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    final_path = dest_dir / entry["filename"]
+    if final_path.exists() and final_path.stat().st_size == entry["size_bytes"]:
+        print(f"  already downloaded: {final_path}")
+        return
+
+    import httpx  # only needed once an actual fetch is happening
+
+    partial_path = dest_dir / f"{entry['filename']}.partial"
+    url = f"https://huggingface.co/{entry['repo']}/resolve/main/{entry['filename']}"
+    print(f"  downloading {entry['label']} -> {final_path}")
+    downloaded = 0
+    try:
+        with httpx.stream("GET", url, follow_redirects=True, timeout=None) as resp:
+            resp.raise_for_status()
+            with open(partial_path, "wb") as f:
+                for chunk in resp.iter_bytes(1 << 20):
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    print(f"\r    {downloaded / entry['size_bytes'] * 100:5.1f}%", end="", flush=True)
+        print()
+        if downloaded != entry["size_bytes"]:
+            raise ValueError(f"size mismatch: got {downloaded}, expected {entry['size_bytes']}")
+        partial_path.rename(final_path)
+        print(f"  done: {final_path}")
+    except Exception as exc:  # network error, disk full, size mismatch
+        print(f"\n  ! download failed ({exc}) -- retry later from the AI Agent "
+              "tab's Settings view")
+        partial_path.unlink(missing_ok=True)
 
 
 # ---- 1. the config file --------------------------------------------------
@@ -241,16 +293,26 @@ def main() -> int:
     backend = ["llamacpp", "ollama"][choose("Which model backend?", ["llamacpp", "ollama"])]
     port = int(ask("Port for this server", str(config._get("AGENT_SERVER_PORT", "8420"))))
 
-    path = write_config(maestro_root, backend, port)
-    print(f"\n[1/4] config written: {path}")
+    # Ollama manages its own model store (`ollama pull`) -- CATALOG is only
+    # the raw .gguf files llama-server loads directly.
+    model_entry = choose_model() if backend == "llamacpp" else None
 
-    print("[2/4] python environment:")
+    path = write_config(maestro_root, backend, port)
+    print(f"\n[1/5] config written: {path}")
+
+    print("[2/5] python environment:")
     venv_python = ensure_venv()
 
-    print("[3/4] llama-server runtime:")
+    print("[3/5] llama-server runtime:")
     offer_runtime_build()
 
-    print("[4/4] Qt side:")
+    print("[4/5] model:")
+    if model_entry:
+        download_model(model_entry)
+    else:
+        print("  skipped -- pick one later from the AI Agent tab's Settings view")
+
+    print("[5/5] Qt side:")
     url = f"http://127.0.0.1:{port}"
     if venv_python:
         # exec so the launched server replaces the shell, not outlives it as
@@ -268,8 +330,11 @@ def main() -> int:
         "\nDone. Next steps:\n"
         f"  * launch the PdM Maestro app -> AI Agent tab -> 'Start local AI'\n"
         f"    (or by hand: cd {SERVER_DIR} && ./venv/bin/uvicorn main:app --host 127.0.0.1 --port {port})\n"
-        "  * models download from inside the app (Settings tab of the AI Agent);\n"
-        "    if step 3 was skipped, POST /runtime/build builds llama-server on demand"
+        f"  * server URL: {url}\n"
+        + (f"  * model ready: {model_entry['label']} -- pick it in the AI Agent tab's Settings view\n"
+           if model_entry else
+           "  * no model downloaded -- pick one from inside the app (Settings tab of the AI Agent)\n")
+        + "    if step 3 was skipped, POST /runtime/build builds llama-server on demand"
     )
     return 0
 

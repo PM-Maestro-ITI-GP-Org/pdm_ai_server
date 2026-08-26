@@ -162,4 +162,11 @@ EMBED_MODEL_HF_ID = "nomic-ai/nomic-embed-text-v1.5-GGUF:Q8_0"
 # (main.py), not silently here.
 AGENT_MAESTRO_ROOT = _get("AGENT_MAESTRO_ROOT", "")
 
+# Which CATALOG entry (by id) the standalone executable should bring up on
+# every launch, not just the one setup ran on -- config.toml had no notion
+# of "the chosen model" until this, so a downloaded model sat unused on
+# every restart after the first. Empty means nothing was ever picked, or
+# the backend is ollama (which manages its own models, nothing to auto-start).
+AGENT_ACTIVE_MODEL = _get("AGENT_ACTIVE_MODEL", "")
+
 CHAT_TIMEOUT_SECONDS = 120.0

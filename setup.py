@@ -211,8 +211,8 @@ def start_backend_and_wait(model_entry: dict, timeout: float = 120.0) -> bool:
 
 # ---- 1. the config file --------------------------------------------------
 
-def write_config(maestro_root: str, backend: str, port: int) -> Path:
-    """Merge the three answers into the existing file, keeping every key this
+def write_config(maestro_root: str, backend: str, port: int, active_model: str = "") -> Path:
+    """Merge the four answers into the existing file, keeping every key this
     script doesn't manage -- rerunning setup after hand-editing something
     else must not erase that edit."""
     existing: dict = {}
@@ -228,6 +228,7 @@ def write_config(maestro_root: str, backend: str, port: int) -> Path:
         "AGENT_MAESTRO_ROOT": maestro_root,
         "AGENT_BACKEND": backend,
         "AGENT_SERVER_PORT": port,
+        "AGENT_ACTIVE_MODEL": active_model,
     }
     merged = {**existing, **managed}
 
@@ -354,7 +355,7 @@ def main() -> int:
     # the raw .gguf files llama-server loads directly.
     model_entry = choose_model() if backend == "llamacpp" else None
 
-    path = write_config(maestro_root, backend, port)
+    path = write_config(maestro_root, backend, port, model_entry["id"] if model_entry else "")
     print(f"\n[1/5] config written: {path}")
 
     print("[2/5] python environment:")
@@ -427,7 +428,7 @@ def run_frozen_setup() -> None:
     port = int(ask("Port for this server", str(config._get("AGENT_SERVER_PORT", "8420"))))
     model_entry = choose_model() if backend == "llamacpp" else None
 
-    path = write_config(maestro_root, backend, port)
+    path = write_config(maestro_root, backend, port, model_entry["id"] if model_entry else "")
     print(f"\n[1/4] config written: {path}")
 
     print("[2/4] llama-server runtime:")

@@ -54,7 +54,10 @@ jobs:
             echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
           else
             git fetch --tags
-            last=$(git tag --list 'v*' --sort=-v:refname | head -n1)
+            # Strict vX.Y.Z only -- a non-semver tag matching 'v*' would sort
+            # ahead of a real version and break patch+1's arithmetic (see the
+            # same fix landing in PdM-Maestro_gui's ci.yml).
+            last=$(git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1)
             if [ -z "$last" ]; then
               next="v0.1.0"
             else
